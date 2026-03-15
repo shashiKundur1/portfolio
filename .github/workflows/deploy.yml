@@ -9,7 +9,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  IMAGE: ghcr.io/${{ github.repository }}
+  IMAGE: ghcr.io/shashikundur1/portfolio
 
 permissions:
   packages: write
