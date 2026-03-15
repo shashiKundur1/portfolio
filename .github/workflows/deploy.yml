@@ -81,7 +81,15 @@ jobs:
             echo "==> Live: portfolio-${LIVE_SLOT} (:${LIVE_PORT})"
             echo "==> Deploying to: portfolio-${NEW_SLOT} (:${NEW_PORT})"
 
-            # --- Login & pull ---
+            # --- Sync repo for nginx.conf ---
+            if [ -d /opt/portfolio ]; then
+              cd /opt/portfolio && git pull --ff-only origin main
+            else
+              git clone https://github.com/shashiKundur1/portfolio.git /opt/portfolio
+            fi
+            cd /
+
+            # --- Login & pull image ---
             echo "${{ secrets.GH_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
             docker pull "$TAG"
 
