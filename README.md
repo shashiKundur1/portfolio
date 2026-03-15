@@ -56,6 +56,25 @@ This generates optimized static assets in the `dist/` directory. The build proce
 2. Applies tree-shaking and code splitting
 3. Outputs production-ready HTML, CSS, and JavaScript
 
+### Testing
+
+```bash
+bun run test          # single run
+bun run test:watch    # watch mode
+```
+
+Tests use [Vitest](https://vitest.dev/) with jsdom. Test files live next to source files as `*.test.js`.
+
+### Linting & Formatting
+
+```bash
+bun run lint          # run ESLint
+bun run format        # format with Prettier (writes changes)
+bun run check         # check formatting + lint (no writes, CI-friendly)
+```
+
+ESLint is configured in `eslint.config.js` and Prettier in `.prettierrc`. Run `bun run check` before pushing.
+
 ## Docker
 
 ### Build the Docker Image
@@ -156,10 +175,11 @@ portfolio/
 ├── src/
 │   ├── main.js                        # Entry point, mounts Svelte app
 │   ├── App.svelte                     # Root component
+│   ├── App.test.js                    # Root component tests
 │   ├── apps/
-│   │   ├── Experience/                # Experience app placeholder
-│   │   ├── Internet/                  # Internet app placeholder
-│   │   └── Projects/                  # Projects app placeholder
+│   │   ├── Experience/                # Experience app (placeholder)
+│   │   ├── Internet/                  # Internet app (placeholder)
+│   │   └── Projects/                  # Projects app (placeholder)
 │   └── lib/
 │       ├── components/
 │       │   ├── Cursor/                # Custom cursor component
@@ -168,14 +188,21 @@ portfolio/
 │       │   └── Window/                # Draggable window component
 │       ├── stores/                    # Svelte stores (reactive state)
 │       ├── styles/
-│       │   ├── global.css             # Global styles
-│       │   └── theme.css              # Theme variables and colors
+│       │   └── global.css             # Global styles
 │       └── utils/                     # Utility functions and helpers
-├── public/                            # Static assets (favicon, etc.)
+├── public/
+│   ├── favicon.svg                    # Site favicon
+│   └── assets/
+│       ├── backgrounds/               # Background images
+│       ├── cursors/                   # Custom cursor assets
+│       └── icons/                     # Icon assets
 ├── .dockerignore                      # Files to exclude from Docker image
 ├── .editorconfig                      # Editor formatting rules
 ├── .gitignore                         # Files to exclude from git
+├── .prettierrc                        # Prettier configuration
+├── .prettierignore                    # Files excluded from Prettier
 ├── Dockerfile                         # Multi-stage Docker build
+├── eslint.config.js                   # ESLint flat configuration
 ├── index.html                         # HTML entry point
 ├── jsconfig.json                      # JavaScript config with path aliases
 ├── nginx-app.conf                     # nginx config for app container
@@ -236,7 +263,19 @@ Before the first deploy, ensure your droplet has:
    certbot certonly --standalone -d shashidev.me -d www.shashidev.me
    ```
 
-3. nginx installed (the deploy workflow handles this automatically on first run)
+3. SSL auto-renewal is handled automatically. Certbot installs a systemd timer that runs twice daily and renews certificates within 30 days of expiry.
+
+   Verify the timer is active:
+   ```bash
+   systemctl status certbot.timer
+   ```
+
+   To manually trigger a renewal:
+   ```bash
+   certbot renew
+   ```
+
+4. nginx installed (the deploy workflow handles this automatically on first run)
 
 ## License
 

@@ -21,4 +21,9 @@ export default defineConfig({
   build: {
     target: 'es2020',
   },
+  test: {
+    environment: 'jsdom',
+    include: ['src/**/*.test.js'],
+    conditions: ['browser'],
+  },
 })

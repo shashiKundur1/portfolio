@@ -129,93 +129,18 @@ jobs:
             fi
 
             # --- Swap traffic: update proxy config to point at new container ---
-            cat > "$PROXY_CONF" <<NGINX_EOF
-            upstream portfolio_backend {
-                server 127.0.0.1:${NEW_PORT};
-            }
-
-            server {
-                listen 80;
-                server_name shashidev.me www.shashidev.me;
-                return 301 https://\$host\$request_uri;
-            }
-
-            server {
-                listen 443 ssl http2;
-                server_name shashidev.me www.shashidev.me;
-
-                server_tokens off;
-
-                ssl_certificate /etc/letsencrypt/live/shashidev.me/fullchain.pem;
-                ssl_certificate_key /etc/letsencrypt/live/shashidev.me/privkey.pem;
-
-                ssl_protocols TLSv1.2 TLSv1.3;
-                ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
-                ssl_prefer_server_ciphers on;
-                ssl_session_cache shared:SSL:10m;
-                ssl_session_timeout 1h;
-                ssl_stapling on;
-                ssl_stapling_verify on;
-                resolver 1.1.1.1 8.8.8.8 valid=300s;
-
-                add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
-
-                location / {
-                    proxy_pass http://portfolio_backend;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto \$scheme;
-                }
-            }
-            NGINX_EOF
+            # Use the repo's nginx.conf as the single source of truth
+            cp /opt/portfolio/nginx.conf "$PROXY_CONF"
+            sed -i "s/127.0.0.1:8080/127.0.0.1:${NEW_PORT}/" "$PROXY_CONF"
 
             # --- Test and reload nginx (zero-downtime swap) ---
             if ! nginx -t; then
               echo "==> Nginx config test FAILED. Rolling back."
               docker stop "portfolio-${NEW_SLOT}" && docker rm "portfolio-${NEW_SLOT}"
-              # Restore previous config
+              # Restore previous config by re-copying and setting the live port
               if [ -n "$(docker ps -q -f name=portfolio-${LIVE_SLOT})" ]; then
-                cat > "$PROXY_CONF" <<NGINX_ROLLBACK
-            upstream portfolio_backend {
-                server 127.0.0.1:${LIVE_PORT};
-            }
-
-            server {
-                listen 80;
-                server_name shashidev.me www.shashidev.me;
-                return 301 https://\$host\$request_uri;
-            }
-
-            server {
-                listen 443 ssl http2;
-                server_name shashidev.me www.shashidev.me;
-
-                server_tokens off;
-
-                ssl_certificate /etc/letsencrypt/live/shashidev.me/fullchain.pem;
-                ssl_certificate_key /etc/letsencrypt/live/shashidev.me/privkey.pem;
-
-                ssl_protocols TLSv1.2 TLSv1.3;
-                ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
-                ssl_prefer_server_ciphers on;
-                ssl_session_cache shared:SSL:10m;
-                ssl_session_timeout 1h;
-                ssl_stapling on;
-                ssl_stapling_verify on;
-                resolver 1.1.1.1 8.8.8.8 valid=300s;
-
-                add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
-
-                location / {
-                    proxy_pass http://portfolio_backend;
-                    proxy_set_header Host \$host;
-                    proxy_set_header X-Real-IP \$remote_addr;
-                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-                    proxy_set_header X-Forwarded-Proto \$scheme;
-                }
-            }
-            NGINX_ROLLBACK
+                cp /opt/portfolio/nginx.conf "$PROXY_CONF"
+                sed -i "s/127.0.0.1:8080/127.0.0.1:${LIVE_PORT}/" "$PROXY_CONF"
                 nginx -s reload
               fi
               exit 1
