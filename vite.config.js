@@ -19,6 +19,6 @@ export default defineConfig({
     devSourcemap: true,
   },
   build: {
-    target: 'esnext',
+    target: 'es2020',
   },
 })
