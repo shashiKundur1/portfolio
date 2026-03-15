@@ -1,0 +1,23 @@
+<script>
+</script>
+
+<main>
+  <h1>shashidev.me</h1>
+</main>
+
+<style>
+  main {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    background: var(--bg);
+  }
+
+  h1 {
+    color: var(--text);
+    font-size: 2rem;
+    font-family: var(--font-mono);
+    letter-spacing: 0.05em;
+  }
+</style>
