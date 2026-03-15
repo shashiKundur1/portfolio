@@ -1,3 +1,7 @@
+<script>
+  // Desktop shell — future components mount here
+</script>
+
 <main>
   <h1>shashidev.me</h1>
 </main>
@@ -9,6 +13,7 @@
     justify-content: center;
     height: 100dvh;
     background: var(--bg);
+    user-select: none;
   }
 
   h1 {

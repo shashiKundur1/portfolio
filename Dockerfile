@@ -29,8 +29,8 @@ RUN bun run build
 # =============================================================================
 # Pin to a specific minor release.  Update when upgrading nginx.
 # To regenerate a SHA digest pin:
-#   docker pull nginx:1.27-alpine && docker inspect --format='{{index .RepoDigests 0}}' nginx:1.27-alpine
-FROM nginx:1.27-alpine AS production
+#   docker pull nginx:1.28-alpine && docker inspect --format='{{index .RepoDigests 0}}' nginx:1.28-alpine
+FROM nginx:1.28-alpine AS production
 
 # curl is lighter than wget for health probes and already common in CI images.
 RUN apk add --no-cache curl \

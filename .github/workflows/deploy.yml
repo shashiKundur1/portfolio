@@ -171,8 +171,7 @@ jobs:
             NGINX_EOF
 
             # --- Test and reload nginx (zero-downtime swap) ---
-            nginx -t
-            if [ $? -ne 0 ]; then
+            if ! nginx -t; then
               echo "==> Nginx config test FAILED. Rolling back."
               docker stop "portfolio-${NEW_SLOT}" && docker rm "portfolio-${NEW_SLOT}"
               # Restore previous config

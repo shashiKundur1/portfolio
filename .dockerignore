@@ -2,12 +2,17 @@ node_modules
 dist
 .workspace
 .git
+.github
 .gitignore
 .vscode
 .idea
 .env
 .env.*
 *.md
+*.log
+.DS_Store
 Dockerfile
 .dockerignore
 docker-compose*.yml
+nginx.conf
+LICENSE
