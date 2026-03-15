@@ -12,6 +12,7 @@ env:
   IMAGE: ghcr.io/shashikundur1/portfolio
 
 permissions:
+  contents: read
   packages: write
 
 jobs:
@@ -44,61 +45,201 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy:
-    name: Deploy to Droplet
+    name: Zero-Downtime Deploy
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy
+      - name: Deploy via blue-green swap
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.DROPLET_IP }}
           username: ${{ secrets.DROPLET_USER }}
           key: ${{ secrets.DROPLET_SSH_KEY }}
           envs: IMAGE
+          command_timeout: 5m
           script: |
-            set -e
+            set -euo pipefail
 
             TAG="${IMAGE}:${{ github.sha }}"
+            PROXY_CONF="/etc/nginx/conf.d/portfolio.conf"
+            BLUE_PORT=8080
+            GREEN_PORT=8081
 
-            # Login to GHCR
+            # --- Determine which slot is currently live ---
+            if docker ps --format '{{.Names}}' | grep -q '^portfolio-blue$'; then
+              LIVE_SLOT="blue"
+              LIVE_PORT=$BLUE_PORT
+              NEW_SLOT="green"
+              NEW_PORT=$GREEN_PORT
+            else
+              LIVE_SLOT="green"
+              LIVE_PORT=$GREEN_PORT
+              NEW_SLOT="blue"
+              NEW_PORT=$BLUE_PORT
+            fi
+
+            echo "==> Live: portfolio-${LIVE_SLOT} (:${LIVE_PORT})"
+            echo "==> Deploying to: portfolio-${NEW_SLOT} (:${NEW_PORT})"
+
+            # --- Login & pull ---
             echo "${{ secrets.GH_PAT }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-
-            # Pull new image
             docker pull "$TAG"
 
-            # Stop old container
-            docker stop portfolio 2>/dev/null || true
-            docker rm portfolio 2>/dev/null || true
+            # --- Stop any leftover container in the new slot ---
+            docker stop "portfolio-${NEW_SLOT}" 2>/dev/null || true
+            docker rm "portfolio-${NEW_SLOT}" 2>/dev/null || true
 
-            # Run new container
+            # --- Start new container on the standby port ---
             docker run -d \
-              --name portfolio \
-              -p 80:80 \
-              -p 443:443 \
-              -v /etc/letsencrypt:/etc/letsencrypt:ro \
+              --name "portfolio-${NEW_SLOT}" \
+              -p "${NEW_PORT}:8080" \
               --restart unless-stopped \
               --memory=256m \
               --cpus=0.5 \
               "$TAG"
 
-            # Healthcheck
-            sleep 3
-            if ! curl -sf http://localhost > /dev/null; then
-              echo "Healthcheck failed — rolling back"
-              docker stop portfolio && docker rm portfolio
-              docker run -d \
-                --name portfolio \
-                -p 80:80 \
-                -p 443:443 \
-                -v /etc/letsencrypt:/etc/letsencrypt:ro \
-                --restart unless-stopped \
-                --memory=256m \
-                --cpus=0.5 \
-                "${IMAGE}:latest"
+            # --- Health check: wait up to 30s for the new container ---
+            echo "==> Waiting for health check on :${NEW_PORT}..."
+            HEALTHY=false
+            for i in $(seq 1 15); do
+              if curl -sf --max-time 2 "http://127.0.0.1:${NEW_PORT}/health" > /dev/null 2>&1; then
+                HEALTHY=true
+                break
+              fi
+              echo "    attempt ${i}/15..."
+              sleep 2
+            done
+
+            if [ "$HEALTHY" != "true" ]; then
+              echo "==> HEALTH CHECK FAILED. Rolling back."
+              docker logs "portfolio-${NEW_SLOT}" --tail 30
+              docker stop "portfolio-${NEW_SLOT}" && docker rm "portfolio-${NEW_SLOT}"
+              echo "==> Rollback complete. Live container unchanged."
               exit 1
             fi
 
-            echo "Deploy successful: $TAG"
+            echo "==> Health check passed."
+
+            # --- Ensure host nginx is installed ---
+            if ! command -v nginx &> /dev/null; then
+              echo "==> Installing nginx on host (first-time setup)..."
+              apt-get update -qq && apt-get install -y -qq nginx
+              # Remove default site
+              rm -f /etc/nginx/sites-enabled/default
+            fi
+
+            # --- Swap traffic: update proxy config to point at new container ---
+            cat > "$PROXY_CONF" <<NGINX_EOF
+            upstream portfolio_backend {
+                server 127.0.0.1:${NEW_PORT};
+            }
+
+            server {
+                listen 80;
+                server_name shashidev.me www.shashidev.me;
+                return 301 https://\$host\$request_uri;
+            }
+
+            server {
+                listen 443 ssl http2;
+                server_name shashidev.me www.shashidev.me;
+
+                server_tokens off;
+
+                ssl_certificate /etc/letsencrypt/live/shashidev.me/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/shashidev.me/privkey.pem;
+
+                ssl_protocols TLSv1.2 TLSv1.3;
+                ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+                ssl_prefer_server_ciphers on;
+                ssl_session_cache shared:SSL:10m;
+                ssl_session_timeout 1h;
+                ssl_stapling on;
+                ssl_stapling_verify on;
+                resolver 1.1.1.1 8.8.8.8 valid=300s;
+
+                add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+
+                location / {
+                    proxy_pass http://portfolio_backend;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                }
+            }
+            NGINX_EOF
+
+            # --- Test and reload nginx (zero-downtime swap) ---
+            nginx -t
+            if [ $? -ne 0 ]; then
+              echo "==> Nginx config test FAILED. Rolling back."
+              docker stop "portfolio-${NEW_SLOT}" && docker rm "portfolio-${NEW_SLOT}"
+              # Restore previous config
+              if [ -n "$(docker ps -q -f name=portfolio-${LIVE_SLOT})" ]; then
+                cat > "$PROXY_CONF" <<NGINX_ROLLBACK
+            upstream portfolio_backend {
+                server 127.0.0.1:${LIVE_PORT};
+            }
+
+            server {
+                listen 80;
+                server_name shashidev.me www.shashidev.me;
+                return 301 https://\$host\$request_uri;
+            }
+
+            server {
+                listen 443 ssl http2;
+                server_name shashidev.me www.shashidev.me;
+
+                server_tokens off;
+
+                ssl_certificate /etc/letsencrypt/live/shashidev.me/fullchain.pem;
+                ssl_certificate_key /etc/letsencrypt/live/shashidev.me/privkey.pem;
+
+                ssl_protocols TLSv1.2 TLSv1.3;
+                ssl_ciphers 'ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384';
+                ssl_prefer_server_ciphers on;
+                ssl_session_cache shared:SSL:10m;
+                ssl_session_timeout 1h;
+                ssl_stapling on;
+                ssl_stapling_verify on;
+                resolver 1.1.1.1 8.8.8.8 valid=300s;
+
+                add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+
+                location / {
+                    proxy_pass http://portfolio_backend;
+                    proxy_set_header Host \$host;
+                    proxy_set_header X-Real-IP \$remote_addr;
+                    proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                    proxy_set_header X-Forwarded-Proto \$scheme;
+                }
+            }
+            NGINX_ROLLBACK
+                nginx -s reload
+              fi
+              exit 1
+            fi
+
+            nginx -s reload
+            echo "==> Traffic switched to portfolio-${NEW_SLOT} (:${NEW_PORT})"
+
+            # --- Verify traffic is flowing through the new container ---
+            sleep 2
+            if ! curl -sf --max-time 5 "http://127.0.0.1:${NEW_PORT}/health" > /dev/null; then
+              echo "==> WARNING: Post-switch verification failed"
+            else
+              echo "==> Post-switch verification passed"
+            fi
+
+            # --- Stop old container ---
+            if docker ps --format '{{.Names}}' | grep -q "^portfolio-${LIVE_SLOT}$"; then
+              echo "==> Stopping old container: portfolio-${LIVE_SLOT}"
+              docker stop "portfolio-${LIVE_SLOT}" && docker rm "portfolio-${LIVE_SLOT}"
+            fi
+
+            echo "==> Deploy complete: $TAG (slot: ${NEW_SLOT}, port: ${NEW_PORT})"
 
   cleanup:
     name: Cleanup Old Images

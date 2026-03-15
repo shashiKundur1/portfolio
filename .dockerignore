@@ -2,5 +2,12 @@ node_modules
 dist
 .workspace
 .git
+.gitignore
 .vscode
+.idea
+.env
+.env.*
 *.md
+Dockerfile
+.dockerignore
+docker-compose*.yml

@@ -1,6 +1,3 @@
-<script>
-</script>
-
 <main>
   <h1>shashidev.me</h1>
 </main>
@@ -10,7 +7,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 100vh;
+    height: 100dvh;
     background: var(--bg);
   }
 

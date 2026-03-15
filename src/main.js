@@ -3,8 +3,6 @@ import './lib/styles/theme.css'
 import './lib/styles/global.css'
 import App from './App.svelte'
 
-const app = mount(App, {
+mount(App, {
   target: document.getElementById('app'),
 })
-
-export default app
